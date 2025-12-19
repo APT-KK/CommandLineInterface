@@ -11,8 +11,7 @@ class Student;
 class AssingmentReviewer : public Member {
     public:
         AssingmentReviewer(string n, int r, string p);
-
-    private:
+        // allow external code (Controller) to create assignments via the reviewer
         void createAssignment(class club* c, string title, int maxScore, string deadline);
     
 };

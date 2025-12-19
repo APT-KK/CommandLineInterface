@@ -22,6 +22,7 @@ class club {
 
         std::string getName() const { return Clubname; }
         Vector<Assignment*>* getAssignments() { return &assignments; }
+    Vector<Member*>* getMembers() { return &members; }
 
         void listallmembers();
         void addMember(Member* m);

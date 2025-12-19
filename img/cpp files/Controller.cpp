@@ -1,16 +1,19 @@
-#include "controller.h"
-#include "club.h"
-#include "Member.h"
-#include "student.h"
-#include "Admin.h"
-#include "vector.h"
+#include "../headers/Controller.h"
+#include "../headers/club.h"
+#include "../headers/Member.h"
+#include "../headers/student.h"
+#include "../headers/Admin.h"
+#include "../headers/AssingmentReviewer.h"
+#include "../headers/vector.h"
+#include "../headers/submission.h"
+#include <cctype>
 #include <iostream>
 #include <string>
-#include <algorithm>
-#include <cctype>
 #include <vector>
 #include <limits>
 using namespace std;
+
+// Controller-managed data will be used instead of globals.
 
     //getchoice_function
     int get_choice(int num_choices) {
@@ -39,18 +42,9 @@ Student* Controller::findStudent(int rollNumber) {
     return nullptr;
 }
 
-    //find club function
-    static string normalizeName(const string& s) {
-        // trim whitespace (including CR) and convert to lowercase
-        size_t start = 0;
-        while (start < s.size() && isspace((unsigned char)s[start])) ++start;
-        size_t end = s.size();
-        while (end > start && isspace((unsigned char)s[end-1])) --end;
-        string t = (start < end) ? s.substr(start, end - start) : string();
-        // to lower
-        std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c){ return std::tolower(c); });
-        return t;
-    }
+// The Controller::findClub method is implemented below and uses the
+// Controller instance's `clubs` member.
+
 
     //display menu
     void display_menu(const vector<string>& options, const string& header="Choose an option:") {
@@ -80,7 +74,10 @@ void Controller::runCLI() {
     while (true) {
         cout << "\n--- MAIN MENU ---\n";
         vector<string> options;
-        static Member* current_user = nullptr;
+    // `current_user` is stored as a Controller member via `members`
+    // but the code uses a single active user variable. We'll store it
+    // as a local static pointer so the rest of the logic works the same.
+    static Member* current_user = nullptr;
 
     if(!current_user){
             options = {
@@ -93,10 +90,6 @@ void Controller::runCLI() {
                 "Create a Club (Admin)",
                 "Join a Club",
                 "View my Clubs",
-                "List all Clubs",
-                // "Add Assignment (Assignment Reviewer)",
-                // "View Assignments",
-                // "Submit Assignment",
                 "Logout",
                 "Exit"
             };
@@ -170,8 +163,8 @@ void Controller::runCLI() {
                         club* newClub = new club(clubName, s);
                         // push into this Controller's clubs list
                         clubs.push_back(newClub);
-                        
-                        // add creator to members of the club (club::addMember avoids duplicates)
+
+                        // add creator to members of the club (club::addMember already avoids duplicates)
                         newClub->addMember(s);
                         // also add the club to the student's clubs list so they can view it (avoid duplicates)
                         bool studentHasClub = false;
@@ -179,7 +172,8 @@ void Controller::runCLI() {
                             if (s->getClubs().get(k) == newClub) { studentHasClub = true; break; }
                         }
                         if (!studentHasClub) s->getClubs().push_back(newClub);
-                        // `members` already contains the student because we pushed it at registration
+                        // ensure the student is registered in controller members list
+                        members.push_back(s);
                         cout << "Club '" << clubName << "' created successfully and " << s->getName() << " is now the admin.\n";
                 }
             } else {
@@ -190,12 +184,10 @@ void Controller::runCLI() {
         cout << "Enter club name to join: ";
         cin.ignore(numeric_limits<streamsize>::max(), '\n');
         getline(cin, clubName);
-
-        // trim whitespace (both ends)
-        while (!clubName.empty() && isspace((unsigned char)clubName.back())) clubName.pop_back();
-        size_t start = 0; while (start < clubName.size() && isspace((unsigned char)clubName[start])) ++start; if (start > 0) clubName = clubName.substr(start);
-        club* c = this->findClub(clubName);
-
+    club* c = this->findClub(clubName);
+    // trim whitespace
+    while (!clubName.empty() && isspace((unsigned char)clubName.back())) clubName.pop_back();
+    size_t start = 0; while (start < clubName.size() && isspace((unsigned char)clubName[start])) start++; if (start > 0) clubName = clubName.substr(start);
         if (c) {
             // check if already a member
             c->addMember(current_user);
@@ -207,13 +199,13 @@ void Controller::runCLI() {
                 if (!already) s->getClubs().push_back(c);
             }
             cout << "Joined club '" << clubName << "' successfully." << std::endl;
-        } else {
+            } else {
             cout << "Club not found. Available clubs:" << std::endl;
-            for (int i = 0; i < clubs.getSize(); i++) cout << " - " << clubs.get(i)->getName() << std::endl;
+            for (std::size_t i = 0; i < clubs.getSize(); ++i) cout << " - " << clubs.get(i)->getName() << std::endl;
         }
     } else if (choice == 3) {
         if (Student* s = dynamic_cast<Student*>(current_user)) {
-            // Get student's clubs 
+            // Get student's clubs (assumes getClubs() returns Vector<club*>&)
             auto& myClubs = s->getClubs();
             if (myClubs.getSize() == 0) {
                 cout << "You are not a member of any clubs.\n";
@@ -244,18 +236,202 @@ void Controller::runCLI() {
                     // go back to main menu
                 } else {
                     club* chosen = myClubs.get(sel - 1);
-                    // Simple club menu
+                    // Expanded club menu with submit/add/check features
                     while (true) {
                         vector<string> clubOptions = {
                             "View Club Details",
+                            "View all Assignments",
+                            "Submit Assignment",
+                            "View my Submissions",
+                            "View a Member's Submissions",
+                            "Promote Member to Assignment Reviewer (Admin)",
+                            "Add Assignment (Assignment Reviewer)",
+                            "Check submissions (Assignment Reviewer only)",
                             "Back"
                         };
                         display_menu(clubOptions, string("Club: ") + chosen->getName());
                         int cchoice = get_choice(clubOptions.size());
                         if (cchoice == 1) {
                             cout << "Club Name: " << chosen->getName() << "\n";
+                            auto membersList = chosen->getMembers();
+                            cout << "Members: " << membersList->getSize() << "\n";
+                            cout << "Assignments: " << chosen->getAssignments()->getSize() << "\n";
                         } else if (cchoice == 2) {
-                            break; // back to main menu
+                            auto assigns = chosen->getAssignments();
+                            if (assigns->getSize() == 0) {
+                                cout << "No assignments in this club.\n";
+                            } else {
+                                cout << "Assignments:\n";
+                                for (std::size_t ai = 0; ai < assigns->getSize(); ++ai) {
+                                    cout << "[" << (ai+1) << "] " << assigns->get(ai)->getTitle() << " (Max: " << assigns->get(ai)->getMaxScore() << ", Deadline: " << assigns->get(ai)->getDeadline() << ")\n";
+                                }
+                            }
+                        } else if (cchoice == 3) {
+                            // Submit Assignment (from inside the club view)
+                            if (Student* s = dynamic_cast<Student*>(current_user)) {
+                                auto myClubs = s->getClubs();
+                                bool found = false;
+                                for (std::size_t k = 0; k < myClubs.getSize(); ++k) if (myClubs.get(k) == chosen) { found = true; break; }
+                                if (!found) { cout << "You are not a member of this club.\n"; }
+                                else {
+                                    auto assigns = chosen->getAssignments();
+                                    if (assigns->getSize() == 0) { cout << "No assignments in this club.\n"; }
+                                    else {
+                                        cout << "Assignments:\n";
+                                        for (std::size_t ai = 0; ai < assigns->getSize(); ++ai) cout << "[" << (ai+1) << "] " << assigns->get(ai)->getTitle() << "\n";
+                                        cout << "Enter assignment number to submit: "; int asel; cin >> asel; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                        if (asel <= 0 || static_cast<std::size_t>(asel) > assigns->getSize()) { cout << "Invalid assignment selection.\n"; }
+                                        else {
+                                            string date; char latec;
+                                            cout << "Enter submission date: "; getline(cin, date);
+                                            cout << "Is it late? (y/n): "; cin >> latec; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                            bool late = (latec == 'y' || latec == 'Y');
+                                            s->submitAssignment(assigns->get(asel-1), date, late);
+                                            cout << "Submission recorded.\n";
+                                        }
+                                    }
+                                }
+                            } else {
+                                cout << "Only Students can submit assignments.\n";
+                            }
+                        } else if (cchoice == 4) {
+                            // View my submissions
+                            if (Student* s = dynamic_cast<Student*>(current_user)) {
+                                auto myClubs = s->getClubs();
+                                bool found = false;
+                                for (std::size_t k = 0; k < myClubs.getSize(); ++k) if (myClubs.get(k) == chosen) { found = true; break; }
+                                if (!found) { cout << "You are not a member of this club.\n"; }
+                                else {
+                                    auto assigns = chosen->getAssignments();
+                                    for (std::size_t ai = 0; ai < assigns->getSize(); ++ai) {
+                                        auto& subs = assigns->get(ai)->getSubmissions();
+                                        bool printedAny = false;
+                                        for (std::size_t si = 0; si < subs.getSize(); ++si) {
+                                            if (subs.get(si)->getStudent() == s) {
+                                                if (!printedAny) { cout << "Submissions for assignment [" << (ai+1) << "] " << assigns->get(ai)->getTitle() << ":\n"; printedAny = true; }
+                                                cout << "  - Date: " << subs.get(si)->getDate() << ", Score: " << subs.get(si)->getScore() << (subs.get(si)->isLate() ? " (late)" : "") << "\n";
+                                            }
+                                        }
+                                        if (!printedAny) cout << "No submission for assignment [" << (ai+1) << "] " << assigns->get(ai)->getTitle() << "\n";
+                                    }
+                                }
+                            } else {
+                                cout << "Only Students have submissions.\n";
+                            }
+                        } else if (cchoice == 5) {
+                            // View a member's submissions
+                            auto mems = chosen->getMembers();
+                            if (mems->getSize() == 0) { cout << "No members in this club.\n"; }
+                            else {
+                                cout << "Club Members:\n";
+                                for (std::size_t mi = 0; mi < mems->getSize(); ++mi) cout << "[" << (mi+1) << "] " << mems->get(mi)->getName() << "\n";
+                                cout << "Enter member number to view their submissions: ";
+                                int msel; cin >> msel; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                if (msel <= 0 || static_cast<std::size_t>(msel) > mems->getSize()) { cout << "Invalid member selection.\n"; }
+                                else {
+                                    Member* target = mems->get(msel-1);
+                                    Student* st = dynamic_cast<Student*>(target);
+                                    if (!st) { cout << "Selected member is not a student (no submissions).\n"; }
+                                    else {
+                                        auto assigns = chosen->getAssignments();
+                                        for (std::size_t ai = 0; ai < assigns->getSize(); ++ai) {
+                                            auto& subs = assigns->get(ai)->getSubmissions();
+                                            bool printed = false;
+                                            for (std::size_t si = 0; si < subs.getSize(); ++si) {
+                                                if (subs.get(si)->getStudent() == st) {
+                                                    if (!printed) { cout << "Submissions for assignment [" << (ai+1) << "] " << assigns->get(ai)->getTitle() << ":\n"; printed = true; }
+                                                    cout << "  - Date: " << subs.get(si)->getDate() << ", Score: " << subs.get(si)->getScore() << (subs.get(si)->isLate() ? " (late)" : "") << "\n";
+                                                }
+                                            }
+                                            if (!printed) cout << "No submission for assignment [" << (ai+1) << "] " << assigns->get(ai)->getTitle() << "\n";
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (cchoice == 6) {
+                            // Promote a member to Assignment Reviewer (club creator only)
+                            auto mems = chosen->getMembers();
+                            if (mems->getSize() == 0) {
+                                cout << "No members in this club.\n";
+                            } else if (mems->get(0) != current_user) {
+                                cout << "Only the club admin (creator) can promote members to Assignment Reviewer.\n";
+                            } else {
+                                cout << "Club Members:\n";
+                                for (std::size_t mi = 0; mi < mems->getSize(); ++mi) cout << "[" << (mi+1) << "] " << mems->get(mi)->getName() << " (roll " << mems->get(mi)->getRoll() << ")\n";
+                                cout << "Enter member number to promote: ";
+                                int msel; cin >> msel; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                if (msel <= 0 || static_cast<std::size_t>(msel) > mems->getSize()) { cout << "Invalid selection.\n"; }
+                                else {
+                                    Member* target = mems->get(msel-1);
+                                    promoteToReviewer(target->getRoll());
+                                }
+                            }
+                        } else if (cchoice == 7) {
+                            // Add Assignment (permission: roll recorded in assignmentReviewers)
+                            if (!current_user) {
+                                cout << "No user logged in.\n";
+                            } else {
+                                bool isReviewer = false;
+                                for (std::size_t ri = 0; ri < assignmentReviewers.getSize(); ++ri) {
+                                    if (assignmentReviewers.get(ri) == current_user->getRoll()) { isReviewer = true; break; }
+                                }
+                                if (isReviewer) {
+                                    string title; int maxScore; string deadline;
+                                    cout << "Enter assignment title: "; cin.ignore(numeric_limits<streamsize>::max(), '\n'); getline(cin, title);
+                                    cout << "Enter max score: "; cin >> maxScore; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                    cout << "Enter deadline (string): "; getline(cin, deadline);
+                                    Assignment* a = new Assignment(title, maxScore, deadline);
+                                    chosen->addAssignment(a);
+                                    cout << "Assignment '" << title << "' added to club '" << chosen->getName() << "'.\n";
+                                } else {
+                                    cout << "Only Assignment Reviewers can add assignments.\n";
+                                }
+                            }
+                        } else if (cchoice == 8) {
+                            // Check submissions (permission: roll recorded in assignmentReviewers)
+                            if (!current_user) {
+                                cout << "No user logged in.\n";
+                            } else {
+                                bool isReviewer = false;
+                                for (std::size_t ri = 0; ri < assignmentReviewers.getSize(); ++ri) {
+                                    if (assignmentReviewers.get(ri) == current_user->getRoll()) { isReviewer = true; break; }
+                                }
+                                if (isReviewer) {
+                                    auto assigns = chosen->getAssignments();
+                                    if (assigns->getSize() == 0) { cout << "No assignments to check.\n"; }
+                                    else {
+                                        cout << "Assignments:\n";
+                                        for (std::size_t ai = 0; ai < assigns->getSize(); ++ai) cout << "[" << (ai+1) << "] " << assigns->get(ai)->getTitle() << "\n";
+                                        cout << "Enter assignment number to check: ";
+                                        int asel; cin >> asel; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                        if (asel <= 0 || static_cast<std::size_t>(asel) > assigns->getSize()) { cout << "Invalid assignment selection.\n"; }
+                                        else {
+                                            auto& subs = assigns->get(asel-1)->getSubmissions();
+                                            if (subs.getSize() == 0) { cout << "No submissions for this assignment.\n"; }
+                                            else {
+                                                cout << "Submissions for assignment '" << assigns->get(asel-1)->getTitle() << "':\n";
+                                                for (std::size_t si = 0; si < subs.getSize(); ++si) {
+                                                    auto ssub = subs.get(si);
+                                                    cout << "[" << (si+1) << "] Student: " << ssub->getStudent()->getName() << ", Date: " << ssub->getDate() << ", Score: " << ssub->getScore() << (ssub->isLate() ? " (late)" : "") << "\n";
+                                                }
+                                                cout << "Enter submission number to set score (or 0 to cancel): ";
+                                                int ssel; cin >> ssel; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                                if (ssel <= 0 || static_cast<std::size_t>(ssel) > subs.getSize()) { cout << "Cancelled or invalid selection.\n"; }
+                                                else {
+                                                    cout << "Enter score (0-" << assigns->get(asel-1)->getMaxScore() << "): ";
+                                                    int score; cin >> score; cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                                                    subs.get(ssel-1)->setScore(score);
+                                                    cout << "Score updated.\n";
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    cout << "Only Assignment Reviewers can check submissions.\n";
+                                }
+                            }
+                        } else if (cchoice == 9) {
+                            break; // back to student's club list / main menu
                         }
                     }
                 }
@@ -263,7 +439,7 @@ void Controller::runCLI() {
         } else {
             cout << "Only Students can view their clubs.\n";
         }
-     } else if (choice == 4) {
+    } else if (choice == 3) {
         if (clubs.empty()) {
             cout << "No clubs available.\n";
         } else {
@@ -272,14 +448,25 @@ void Controller::runCLI() {
                 cout << "- " << clubs.get(i)->getName() << "\n";
             }
         }
-    } else if (choice == 5) {
+    }   else if (choice == 4) {
         cout << "Logging out " << current_user->getName() << ".\n";
         current_user = nullptr;
-    } else if (choice == 6) {
+    } else if (choice == 5) {
         cout << "Exiting the system. Goodbye!\n";
         break;
     }
   }
  }
 
+}
+
+void Controller::promoteToReviewer(int roll) {
+    // Ensure member exists
+    Member* target = nullptr;
+    for (std::size_t i = 0; i < members.getSize(); ++i) if (members.get(i)->getRoll() == roll) { target = members.get(i); break; }
+    if (!target) { cout << "Member with roll " << roll << " not found.\n"; return; }
+    // avoid duplicates
+    for (std::size_t i = 0; i < assignmentReviewers.getSize(); ++i) if (assignmentReviewers.get(i) == roll) { cout << "Member is already an Assignment Reviewer.\n"; return; }
+    assignmentReviewers.push_back(roll);
+    cout << "Member roll " << roll << " promoted to Assignment Reviewer.\n";
 }
